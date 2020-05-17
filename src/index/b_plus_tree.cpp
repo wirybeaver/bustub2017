@@ -75,9 +75,10 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
     // b+ tree initialization
     B_PLUS_TREE_LEAF_PAGE_TYPE &root = *(reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(page.GetData()));
     root.Init(pageId, INVALID_PAGE_ID);
+    root.Insert(key, value, comparator_);
+    // update root page id
     root_page_id_ = pageId;
     UpdateRootPageId(true);
-    root.Insert(key, value, comparator_);
     buffer_pool_manager_->UnpinPage(pageId, true);
 }
 
@@ -92,19 +93,19 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
                                     Transaction *transaction) {
-  B_PLUS_TREE_LEAF_PAGE_TYPE &leafPage = *(FindLeafPage(key));
+  auto *leafPage = FindLeafPage(key);
   ValueType v;
-  bool containsKey = leafPage.Lookup(key, v, comparator_);
+  bool containsKey = leafPage->Lookup(key, v, comparator_);
   if (containsKey) {
-      buffer_pool_manager_->UnpinPage(leafPage.GetPageId(), false);
+      buffer_pool_manager_->UnpinPage(leafPage->GetPageId(), false);
       return false;
   }
-  leafPage.Insert(key, value, comparator_);
-  if(leafPage.GetSize() > leafPage.GetMaxSize()) {
-      B_PLUS_TREE_LEAF_PAGE_TYPE &splittedRightPage = *(Split(&leafPage));
-      InsertIntoParent(&leafPage, splittedRightPage.KeyAt(0), &splittedRightPage, transaction);
+  leafPage->Insert(key, value, comparator_);
+  if(leafPage->GetSize() > leafPage->GetMaxSize()) {
+      auto *splittedRightPage = Split(leafPage);
+      InsertIntoParent(leafPage, splittedRightPage->KeyAt(0), splittedRightPage, transaction);
   }
-  buffer_pool_manager_->UnpinPage(leafPage.GetPageId(), true);
+  buffer_pool_manager_->UnpinPage(leafPage->GetPageId(), true);
   return true;
 }
 
@@ -131,7 +132,23 @@ INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node,
                                       const KeyType &key,
                                       BPlusTreePage *new_node,
-                                      Transaction *transaction) {}
+                                      Transaction *transaction) {
+    if (old_node->IsRootPage()) {
+
+    }
+    page_id_t pageId = old_node->GetParentPageId();
+    auto *physicalPage = buffer_pool_manager_->FetchPage(pageId);
+    assert(physicalPage != nullptr);
+    new_node->SetParentPageId(pageId);
+    buffer_pool_manager_->UnpinPage(new_node->GetPageId(), true);
+    auto *internalPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(physicalPage->GetData());
+    internalPage->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
+    if(internalPage->GetSize() > internalPage->GetMaxSize()) {
+        auto *splittedRightPage = Split(internalPage);
+        InsertIntoParent(internalPage, splittedRightPage->KeyAt(0), splittedRightPage, transaction);
+    }
+    buffer_pool_manager_->UnpinPage(pageId, true);
+}
 
 /*****************************************************************************
  * REMOVE
