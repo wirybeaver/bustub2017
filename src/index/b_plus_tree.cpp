@@ -134,7 +134,19 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node,
                                       BPlusTreePage *new_node,
                                       Transaction *transaction) {
     if (old_node->IsRootPage()) {
-
+        page_id_t pageId;
+        Page* phyPage = buffer_pool_manager_->NewPage(pageId);
+        assert(phyPage != nullptr);
+        auto newRootPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(phyPage->GetData());
+        newRootPage->Init(pageId, INVALID_PAGE_ID);
+        newRootPage->PopulateNewRoot(old_node->GetPageId(), key, new_node->GetPageId());
+        new_node->SetParentPageId(pageId);
+        old_node->SetParentPageId(pageId);
+        root_page_id_ = pageId;
+        UpdateRootPageId();
+        buffer_pool_manager_->UnpinPage(root_page_id_, true);
+        buffer_pool_manager_->UnpinPage(new_node->GetPageId(), true);
+        return;
     }
     page_id_t pageId = old_node->GetParentPageId();
     auto *physicalPage = buffer_pool_manager_->FetchPage(pageId);
