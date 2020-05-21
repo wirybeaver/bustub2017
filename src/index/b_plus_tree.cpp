@@ -37,7 +37,13 @@ INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::GetValue(const KeyType &key,
                               std::vector<ValueType> &result,
                               Transaction *transaction) {
-  return false;
+    if(IsEmpty()) {
+        return false;
+    }
+    auto *leafPage = FindLeafPage(key);
+    bool ans = leafPage->Lookup(key, result[0], comparator_);
+    buffer_pool_manager_->UnpinPage(leafPage->GetPageId(), false);
+    return ans;
 }
 
 /*****************************************************************************
@@ -53,11 +59,11 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key,
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value,
                             Transaction *transaction) {
-  if(IsEmpty()) {
+    if(IsEmpty()) {
       StartNewTree(key, value);
       return true;
-  }
-  return InsertIntoLeaf(key, value, transaction);
+    }
+    return InsertIntoLeaf(key, value, transaction);
 }
 /*
  * Insert constant key & value pair into an empty tree
@@ -93,6 +99,7 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
                                     Transaction *transaction) {
+    // assumption: the tree is not empty.
   auto *leafPage = FindLeafPage(key);
   ValueType v;
   bool containsKey = leafPage->Lookup(key, v, comparator_);
@@ -267,7 +274,24 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) {
 INDEX_TEMPLATE_ARGUMENTS
 B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
                                                          bool leftMost) {
-  return nullptr;
+    if(IsEmpty()) {
+        return nullptr;
+    }
+    page_id_t cur = root_page_id_;
+    auto *phyPage = buffer_pool_manager_->FetchPage(cur);
+    assert(phyPage!= nullptr);
+    auto *node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
+    while(!node->IsLeafPage()) {
+        auto *internalNode = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(node);
+        RID pointer = leftMost? static_cast<RID>(internalNode->ValueAt(0)) :
+                static_cast<RID>(internalNode->Lookup(key, comparator_));
+        buffer_pool_manager_->UnpinPage(cur, false);
+        cur = pointer.GetPageId();
+        phyPage = buffer_pool_manager_->FetchPage(cur);
+        assert(phyPage!= nullptr);
+        node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
+    }
+    return reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(node);
 }
 
 /*
