@@ -124,7 +124,15 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
  * of key & value pairs from input page to newly created page
  */
 INDEX_TEMPLATE_ARGUMENTS
-template <typename N> N *BPLUSTREE_TYPE::Split(N *node) { return nullptr; }
+template <typename N> N *BPLUSTREE_TYPE::Split(N *node) {
+    page_id_t newPageId;
+    auto *phypage = buffer_pool_manager_->NewPage(newPageId);
+    assert(phypage!=nullptr);
+    N *newNode = reinterpret_cast<N *>(phypage->GetData());
+    newNode->Init(newPageId, node->GetParentPageId());
+    node->MoveHalfTo(newNode, buffer_pool_manager_);
+    return newNode;
+}
 
 /*
  * Insert key & value pair into internal page after split
@@ -283,11 +291,12 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
     auto *node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
     while(!node->IsLeafPage()) {
         auto *internalNode = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(node);
-        RID pointer = leftMost? static_cast<RID>(internalNode->ValueAt(0)) :
-                static_cast<RID>(internalNode->Lookup(key, comparator_));
-        buffer_pool_manager_->UnpinPage(cur, false);
+        const ValueType &pointer = leftMost? internalNode->ValueAt(0) :
+                internalNode->Lookup(key, comparator_);
+        page_id_t prev = cur;
         cur = pointer.GetPageId();
         phyPage = buffer_pool_manager_->FetchPage(cur);
+        buffer_pool_manager_->UnpinPage(prev, false);
         assert(phyPage!= nullptr);
         node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
     }
