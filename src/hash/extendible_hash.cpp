@@ -37,9 +37,13 @@ int ExtendibleHash<K, V>::GetGlobalDepth() const {
  */
 template <typename K, typename V>
 int ExtendibleHash<K, V>::GetLocalDepth(int bucket_id) const {
-    lock_guard<mutex> lock(latch);
-    if (buckets[bucket_id] && !buckets[bucket_id]->mp.empty()) {
-        return buckets[bucket_id]->localDepth;
+    unique_lock<mutex> globalLock(latch);
+    if (buckets[bucket_id]) {
+        unique_lock<mutex> bucketLock(buckets[bucket_id]->latch);
+        globalLock.unlock();
+        {
+            return buckets[bucket_id]->localDepth;
+        }
     }
     return -1;
 }
@@ -58,7 +62,17 @@ int ExtendibleHash<K, V>::GetNumBuckets() const {
  */
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
-  return false;
+    unique_lock<mutex> globalLock(latch);
+    int pos = getIdx(key);
+    unique_lock<mutex> localLock(buckets[pos]->latch);
+    globalLock.unlock();
+    auto iter = buckets[pos]->mp.find(key);
+    if(iter!=buckets[pos]->mp.end()) {
+        value = iter->second;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 /*
@@ -72,8 +86,7 @@ bool ExtendibleHash<K, V>::Remove(const K &key) {
 
 template <typename K, typename V>
 int ExtendibleHash<K, V>::getIdx(const K &key) {
-    lock_guard<mutex> lck(latch);
-    return HashKey(key) & (unsigned)((1u<<(unsigned)globalDepth)-1);
+    return HashKey(key) & ((1u<<(size_t)globalDepth)-1);
 }
 /*
  * insert <key,value> entry in hash table
