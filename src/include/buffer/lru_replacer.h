@@ -34,7 +34,7 @@ template <typename T> class LRUReplacer : public Replacer<T> {
 
   private:
     // add your member variables here
-    std::unordered_map<T, std::list::iterator<T>> mp;
+    std::unordered_map<T, typename std::list<T>::iterator> mp;
     std::list<T> lst;
     mutable std::mutex latch;
 };

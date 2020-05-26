@@ -18,7 +18,7 @@ template <typename T> void LRUReplacer<T>::Insert(const T &value) {
     auto mp_iter = mp.find(value);
     if(mp_iter==mp.end()) {
         lst.emplace_front(value);
-        mp.emplace(value, mp.begin());
+        mp.emplace(value, lst.begin());
     } else {
         lst.splice(lst.begin(), lst, mp_iter->second);
         mp[value] = lst.begin();
@@ -52,6 +52,7 @@ template <typename T> bool LRUReplacer<T>::Erase(const T &value) {
     auto lst_iter = mp_iter->second;
     mp.erase(mp_iter);
     lst.erase(lst_iter);
+    return true;
 }
 
 template <typename T> size_t LRUReplacer<T>::Size() {

@@ -1,0 +1,1 @@
+/Library/Developer/CommandLineTools/usr/bin/cc  -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX10.14.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names  CMakeFiles/sqlite3_shell.dir/sqlite/shell.c.o  -o ../bin/sqlite3  -Wl,-rpath,/Users/xuanyi.li/gitcode/leptonDB/build/lib ../lib/libsqlite3.dylib 

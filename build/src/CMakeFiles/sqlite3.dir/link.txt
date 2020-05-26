@@ -1,0 +1,1 @@
+/Library/Developer/CommandLineTools/usr/bin/cc  -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX10.14.sdk -dynamiclib -Wl,-headerpad_max_install_names  -o ../lib/libsqlite3.dylib -install_name @rpath/libsqlite3.dylib CMakeFiles/sqlite3.dir/sqlite/sqlite3.c.o 
