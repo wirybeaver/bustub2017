@@ -27,6 +27,7 @@ class ExtendibleHash : public HashTable<K, V> {
         Bucket(int depth) : localDepth(depth) {};
         int localDepth;
         map<K, V> mp;
+        mutable mutex latch;
     };
     public:
       // constructor
