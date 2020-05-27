@@ -11,7 +11,9 @@ namespace cmudb {
  * array_size: fixed array size for each bucket
  */
 template <typename K, typename V>
-ExtendibleHash<K, V>::ExtendibleHash(size_t size) {}
+ExtendibleHash<K, V>::ExtendibleHash(size_t size) {
+    this->bucketSize = size;
+}
 
 /*
  * helper function to calculate the hashing address of input key
@@ -81,7 +83,12 @@ bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
  */
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Remove(const K &key) {
-  return false;
+    unique_lock<mutex> globalLock(latch);
+    int pos = getIdx(key);
+    unique_lock<mutex> localLock(buckets[pos]->latch);
+    globalLock.unlock();
+    int count = buckets[pos]->mp.erase(key);
+    return count>0;
 }
 
 template <typename K, typename V>
@@ -94,7 +101,37 @@ int ExtendibleHash<K, V>::getIdx(const K &key) {
  * global depth
  */
 template <typename K, typename V>
-void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {}
+void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
+    unique_lock<mutex> globalLock(latch);
+    shared_ptr<Bucket> cur = buckets[getIdx(key)];
+    while(cur->mp.count(key)==0 && cur->mp.size()>= bucketSize) {
+        auto mask = 1u<<(unsigned)(cur->localDepth);
+        cur->localDepth++;
+        if(cur->localDepth > globalDepth) {
+            globalDepth++;
+            int length = buckets.size();
+            for(int i=0; i<length; i++) {
+                buckets.push_back(buckets[i]);
+            }
+        }
+        bucketNum++;
+        auto newBucketPtr = make_shared<Bucket>(cur->localDepth);
+        for(auto iter =cur->mp.begin(); iter!=cur->mp.end();) {
+            if(HashKey(iter->first) & mask) {
+                newBucketPtr->mp[iter->first] = iter->second;
+            } else {
+                iter++;
+            }
+        }
+        for(size_t i=0; i<buckets.size(); i++) {
+            if(buckets[i]== cur && (i & mask)) {
+                buckets[i] = newBucketPtr;
+            }
+        }
+        cur = buckets[getIdx(key)];
+    }
+    cur->mp[key] = value;
+}
 
 template class ExtendibleHash<page_id_t, Page *>;
 template class ExtendibleHash<Page *, std::list<Page *>::iterator>;
