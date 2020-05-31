@@ -18,7 +18,13 @@ namespace cmudb {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(page_id_t page_id,
-                                          page_id_t parent_id) {}
+                                          page_id_t parent_id) {
+    SetPageType(IndexPageType::INTERNAL_PAGE);
+    SetSize(0);
+    SetMaxSize((PAGE_SIZE-sizeof(BPlusTreeInternalPage))/sizeof(MappingType)-1);
+    SetParentPageId(parent_id);
+    SetParentPageId(page_id);
+}
 /*
  * Helper method to get/set the key associated with input "index"(a.k.a
  * array offset)
@@ -26,12 +32,15 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(page_id_t page_id,
 INDEX_TEMPLATE_ARGUMENTS
 KeyType B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const {
   // replace with your own code
-  KeyType key;
-  return key;
+    assert(index >= 0 && index < GetSize());
+    return array[index].first;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {}
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
+    assert(index >= 0 && index < GetSize());
+    array[index].first = key;
+}
 
 /*
  * Helper method to find and return array index(or offset), so that its value
@@ -39,7 +48,11 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {}
  */
 INDEX_TEMPLATE_ARGUMENTS
 int B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueIndex(const ValueType &value) const {
-  return 0;
+    for (int i = 0; i < GetSize(); i++) {
+        if (value != ValueAt(i)) continue;
+        return i;
+    }
+    return -1;
 }
 
 /*
@@ -47,7 +60,10 @@ int B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueIndex(const ValueType &value) const {
  * offset)
  */
 INDEX_TEMPLATE_ARGUMENTS
-ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const { return 0; }
+ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const {
+    assert(index >= 0 && index < GetSize());
+    return array[index].second;
+}
 
 /*****************************************************************************
  * LOOKUP
