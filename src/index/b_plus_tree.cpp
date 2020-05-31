@@ -152,7 +152,7 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node,
         page_id_t pageId;
         Page* phyPage = buffer_pool_manager_->NewPage(pageId);
         assert(phyPage != nullptr);
-        auto newRootPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(phyPage->GetData());
+        auto newRootPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(phyPage->GetData());
         newRootPage->Init(pageId, INVALID_PAGE_ID);
         newRootPage->PopulateNewRoot(old_node->GetPageId(), key, new_node->GetPageId());
         new_node->SetParentPageId(pageId);
@@ -168,7 +168,7 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node,
     assert(physicalPage != nullptr);
     new_node->SetParentPageId(pageId);
     buffer_pool_manager_->UnpinPage(new_node->GetPageId(), true);
-    auto *internalPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(physicalPage->GetData());
+    auto *internalPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(physicalPage->GetData());
     internalPage->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
     if(internalPage->GetSize() > internalPage->GetMaxSize()) {
         auto *splittedRightPage = Split(internalPage);
@@ -290,17 +290,20 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
     assert(phyPage!= nullptr);
     auto *node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
     while(!node->IsLeafPage()) {
-        auto *internalNode = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE_TYPE *>(node);
-        const ValueType &pointer = leftMost? internalNode->ValueAt(0) :
-                internalNode->Lookup(key, comparator_);
-        page_id_t prev = cur;
-        cur = pointer.GetPageId();
-        phyPage = buffer_pool_manager_->FetchPage(cur);
-        buffer_pool_manager_->UnpinPage(prev, false);
+        page_id_t next;
+        auto *internalNode = static_cast<B_PLUS_TREE_INTERNAL_PAGE *>(node);
+        if(leftMost) {
+            next = internalNode->ValueAt(0);
+        } else {
+            next = internalNode->Lookup(key, comparator_);
+        }
+        phyPage = buffer_pool_manager_->FetchPage(next);
+        buffer_pool_manager_->UnpinPage(cur, false);
         assert(phyPage!= nullptr);
         node = reinterpret_cast<BPlusTreePage *>(phyPage->GetData());
+        cur = next;
     }
-    return reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(node);
+    return static_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(node);
 }
 
 /*
