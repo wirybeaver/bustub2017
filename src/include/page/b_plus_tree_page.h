@@ -58,6 +58,16 @@ public:
 
   void SetLSN(lsn_t lsn = INVALID_LSN);
 
+  inline bool IsSafe(BTreeOpType op) {
+      if(op==BTreeOpType::INSERT) {
+          return GetSize()<GetMaxSize();
+      } else if(op==BTreeOpType::DELETE) {
+          return GetSize()>GetMinSize();
+      } else {
+          assert(false);
+      }
+  }
+
 private:
   // member variable, attributes that both internal and leaf page share
   IndexPageType page_type_;
