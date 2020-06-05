@@ -13,6 +13,9 @@
 namespace cmudb {
 
     INDEX_TEMPLATE_ARGUMENTS
+    thread_local int BPLUSTREE_TYPE::rootLockedCnt = 0;
+
+    INDEX_TEMPLATE_ARGUMENTS
     BPLUSTREE_TYPE::BPlusTree(const std::string &name,
                               BufferPoolManager *buffer_pool_manager,
                               const KeyComparator &comparator,
@@ -24,7 +27,9 @@ namespace cmudb {
  * Helper function to decide whether current b+tree is empty
  */
     INDEX_TEMPLATE_ARGUMENTS
-    bool BPLUSTREE_TYPE::IsEmpty() const { return root_page_id_ == INVALID_PAGE_ID; }
+    bool BPLUSTREE_TYPE::IsEmpty() const {
+        return root_page_id_ == INVALID_PAGE_ID;
+    }
 /*****************************************************************************
  * SEARCH
  *****************************************************************************/
