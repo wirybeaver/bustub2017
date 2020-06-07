@@ -62,12 +62,13 @@ namespace cmudb {
         // expose for test purpose
         B_PLUS_TREE_LEAF_PAGE_TYPE *FindLeafPage(const KeyType &key,
                                                  bool leftMost = false,
+                                                 Page *rawLeafPage = nullptr,
                                                  BTreeOpType op = BTreeOpType::READ,
                                                  Transaction *transaction = nullptr);
 
-        BPlusTreePage *CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction);
+        BPlusTreePage *CrabbingFetchPage(page_id_t child, Page *rawPage, BTreeOpType op, Transaction *transaction);
 
-        void FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction, Page *cur);
+        void FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction, Page *cur = nullptr);
 
     private:
         void StartNewTree(const KeyType &key, const ValueType &value);
@@ -99,9 +100,6 @@ namespace cmudb {
         void UpdateRootPageId(int insert_record = false);
 
         // advisory function
-        void LockPage(bool exclusive, Page *page);
-
-        void UnlockPage(bool exclusive, Page *page);
 
         void LockRootPageId(bool exclusive);
 

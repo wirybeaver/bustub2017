@@ -42,12 +42,13 @@ namespace cmudb {
     bool BPLUSTREE_TYPE::GetValue(const KeyType &key,
                                   std::vector<ValueType> &result,
                                   Transaction *transaction) {
-        if (IsEmpty()) {
+        auto *leafPage = FindLeafPage(key);
+        if(leafPage == nullptr) {
             return false;
         }
-        auto *leafPage = FindLeafPage(key);
+        assert(!result.empty());
         bool ans = leafPage->Lookup(key, result[0], comparator_);
-        buffer_pool_manager_->UnpinPage(leafPage->GetPageId(), false);
+        FreePagesInTransaction(false, false, transaction);
         return ans;
     }
 
@@ -64,6 +65,7 @@ namespace cmudb {
     INDEX_TEMPLATE_ARGUMENTS
     bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value,
                                 Transaction *transaction) {
+        assert(transaction != nullptr);
         LockRootPageId(true);
         if (IsEmpty()) {
             StartNewTree(key, value);
@@ -108,11 +110,12 @@ namespace cmudb {
     bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
                                         Transaction *transaction) {
         // assumption: the tree is not empty.
-        auto *leafPage = FindLeafPage(key);
+        Page *rawLeafPage = nullptr;
+        auto *leafPage = FindLeafPage(key, false, rawLeafPage, BTreeOpType::INSERT, transaction);
         ValueType v;
         bool containsKey = leafPage->Lookup(key, v, comparator_);
         if (containsKey) {
-            FreePagesInTransaction(true, false, transaction, nullptr);
+            FreePagesInTransaction(true, false, transaction);
             return false;
         }
         leafPage->Insert(key, value, comparator_);
@@ -120,7 +123,7 @@ namespace cmudb {
             auto *splittedRightPage = Split(leafPage, transaction);
             InsertIntoParent(leafPage, splittedRightPage->KeyAt(0), splittedRightPage, transaction);
         }
-        FreePagesInTransaction(true, false, transaction, nullptr);
+        FreePagesInTransaction(true, false, transaction);
         return true;
     }
 
@@ -161,25 +164,24 @@ namespace cmudb {
                                           Transaction *transaction) {
         if (old_node->IsRootPage()) {
             page_id_t pageId;
-            Page *phyPage = buffer_pool_manager_->NewPage(pageId);
-            assert(phyPage != nullptr);
-            auto newRootPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(phyPage->GetData());
+            Page *rawPage = buffer_pool_manager_->NewPage(pageId);
+            assert(rawPage != nullptr);
+            auto newRootPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(rawPage->GetData());
             newRootPage->Init(pageId, INVALID_PAGE_ID);
             newRootPage->PopulateNewRoot(old_node->GetPageId(), key, new_node->GetPageId());
             new_node->SetParentPageId(pageId);
             old_node->SetParentPageId(pageId);
             root_page_id_ = pageId;
             UpdateRootPageId();
-            buffer_pool_manager_->UnpinPage(root_page_id_, true);
-            buffer_pool_manager_->UnpinPage(new_node->GetPageId(), true);
+            buffer_pool_manager_->UnpinPage(pageId, true);
             return;
         }
         page_id_t pageId = old_node->GetParentPageId();
-        auto *physicalPage = buffer_pool_manager_->FetchPage(pageId);
-        assert(physicalPage != nullptr);
+        // second pin
+        auto *rawPage = buffer_pool_manager_->FetchPage(pageId);
+        assert(rawPage != nullptr);
         new_node->SetParentPageId(pageId);
-        buffer_pool_manager_->UnpinPage(new_node->GetPageId(), true);
-        auto *internalPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(physicalPage->GetData());
+        auto *internalPage = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(rawPage->GetData());
         internalPage->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
         if (internalPage->GetSize() > internalPage->GetMaxSize()) {
             auto *splittedRightPage = Split(internalPage);
@@ -293,6 +295,7 @@ namespace cmudb {
     INDEX_TEMPLATE_ARGUMENTS
     B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
                                                              bool leftMost,
+                                                             Page *rawPage,
                                                              BTreeOpType op,
                                                              Transaction *transaction) {
         bool exclusive = op != BTreeOpType::READ;
@@ -301,17 +304,20 @@ namespace cmudb {
             TryUnlockRootPageId(exclusive);
             return nullptr;
         }
-        auto *bTreeNode = CrabbingFetchPage(root_page_id_, op, transaction);
+        rawPage = nullptr;
+        auto *bTreeNode = CrabbingFetchPage(root_page_id_, rawPage, op, transaction);
         while (!bTreeNode->IsLeafPage()) {
             auto *internalNode = static_cast<B_PLUS_TREE_INTERNAL_PAGE *>(bTreeNode);
             page_id_t child = leftMost? internalNode->ValueAt(0) : internalNode->Lookup(key, comparator_);
-            bTreeNode = CrabbingFetchPage(child, op, transaction);
+            rawPage = nullptr;
+            bTreeNode = CrabbingFetchPage(child, rawPage, op, transaction);
         }
+        assert(rawPage->GetPageId() == bTreeNode->GetPageId());
         return static_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(bTreeNode);
     }
 
     INDEX_TEMPLATE_ARGUMENTS
-    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction){
+    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, Page * rawPage, BTreeOpType op, Transaction *transaction){
         bool exclusive = op != BTreeOpType::READ;
         auto *childRawPage = buffer_pool_manager_->FetchPage(child);
         assert(childRawPage != nullptr);
@@ -323,6 +329,8 @@ namespace cmudb {
         if(transaction != nullptr) {
             transaction->AddIntoPageSet(childRawPage);
         }
+        rawPage = childRawPage;
+        assert(rawPage->GetPageId() == childBTreeNode->GetPageId());
         return childBTreeNode;
     }
 
@@ -331,8 +339,8 @@ namespace cmudb {
         TryUnlockRootPageId(exclusive);
         bool likelyDirty = exclusive && !findLeafPageOngoing;
         if (transaction == nullptr) {
-            // read operation, recursively going down.
-            assert(!exclusive && cur != nullptr && findLeafPageOngoing);
+            // called by iterator
+            assert(!exclusive && findLeafPageOngoing && cur != nullptr);
             cur->UnLatch(exclusive);
             buffer_pool_manager_->UnpinPage(cur->GetPageId(), likelyDirty);
             return;
