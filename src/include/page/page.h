@@ -33,6 +33,20 @@ public:
   inline void WLatch() { rwlatch_.WLock(); }
   inline void RUnlatch() { rwlatch_.RUnlock(); }
   inline void RLatch() { rwlatch_.RLock(); }
+  inline void Latch(bool exclusive) {
+      if(exclusive) {
+          WLatch();
+      } else {
+          RLatch();
+      }
+  }
+  inline void UnLatch(bool exclusive) {
+      if(exclusive) {
+          WUnlatch();
+      } else {
+          RUnlatch();
+      }
+  }
 
   inline lsn_t GetLSN() { return *reinterpret_cast<lsn_t *>(GetData() + 4); }
   inline void SetLSN(lsn_t lsn) { memcpy(GetData() + 4, &lsn, 4); }

@@ -65,6 +65,10 @@ namespace cmudb {
                                                  BTreeOpType op = BTreeOpType::READ,
                                                  Transaction *transaction = nullptr);
 
+        BPlusTreePage *CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction);
+
+        void FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction, Page *cur);
+
     private:
         void StartNewTree(const KeyType &key, const ValueType &value);
 
@@ -76,7 +80,7 @@ namespace cmudb {
                               Transaction *transaction = nullptr);
 
         template<typename N>
-        N *Split(N *node);
+        N *Split(N *node, Transaction *transaction = nullptr);
 
         template<typename N>
         bool CoalesceOrRedistribute(N *node, Transaction *transaction = nullptr);
@@ -102,6 +106,7 @@ namespace cmudb {
         void LockRootPageId(bool exclusive);
 
         void TryUnlockRootPageId(bool exclusive);
+
 
         // member variable
         std::string index_name_;
