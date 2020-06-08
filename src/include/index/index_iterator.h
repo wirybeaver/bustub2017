@@ -26,7 +26,7 @@ public:
   ~IndexIterator();
 
   bool isEnd() {
-      cur_leaf_page_ == nullptr;
+      return cur_leaf_page_ == nullptr;
   }
 
   const MappingType &operator*() {
@@ -38,13 +38,13 @@ public:
       if(index_>=cur_leaf_page_->GetSize()){
           page_id_t nextPageId = cur_leaf_page_->GetNextPageId();
           raw_page_->UnLatch(false);
-          buffer_pool_manager_->UnpinPage(cur_leaf_page_->GetPageId());
+          buffer_pool_manager_->UnpinPage(cur_leaf_page_->GetPageId(), false);
           if(nextPageId == INVALID_PAGE_ID) {
               cur_leaf_page_ = nullptr;
           } else {
               raw_page_ = buffer_pool_manager_->FetchPage(nextPageId);
               raw_page_->Latch(false);
-              cur_leaf_page_ = reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE>(raw_page_->GetData());
+              cur_leaf_page_ = reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(raw_page_->GetData());
               index_ = 0;
           }
       }

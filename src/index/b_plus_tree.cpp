@@ -110,7 +110,6 @@ namespace cmudb {
     bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
                                         Transaction *transaction) {
         // assumption: the tree is not empty.
-        Page *rawLeafPage = nullptr;
         auto *leafPage = FindLeafPage(key, false,BTreeOpType::INSERT, transaction);
         ValueType v;
         bool containsKey = leafPage->Lookup(key, v, comparator_);
