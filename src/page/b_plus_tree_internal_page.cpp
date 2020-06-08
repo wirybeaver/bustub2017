@@ -156,7 +156,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyHalfFrom(
         auto *childTreePage = reinterpret_cast<BPlusTreePage *>(childRawPage->GetData());
         childTreePage->SetParentPageId(GetPageId());
         buffer_pool_manager->UnpinPage(items[i].second, true);
-        array[idx] = items[i];
+        array[idx].first = items[i].first;
+        array[idx].second = items[i].second;
     }
     IncreaseSize(size);
 }
@@ -174,7 +175,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Remove(int index) {
     int length = GetSize();
     assert(index >=0 && index<length);
     for(int i=index+1; i<length; i++) {
-        array[i-1] = array[i];
+        array[i-1].first = array[i].first;
+        array[i-1].second = array[i].second;
     }
     IncreaseSize(-1);
 }
@@ -220,7 +222,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyAllFrom(
     MappingType *items, int size, BufferPoolManager *buffer_pool_manager) {
     int length = GetSize();
     for(int i=0; i<size; i++) {
-        array[length+i] = items[i];
+        array[length+i].first = items[i].first;
+        array[length+i].second = items[i].second;
         auto *childRawPage = buffer_pool_manager->FetchPage(items[i].second);
         assert(childRawPage!=nullptr);
         auto *childTreePage = reinterpret_cast<BPlusTreePage *>(childRawPage->GetData());
@@ -259,7 +262,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveFirstToEndOf(
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyLastFrom(
     const MappingType &pair, BufferPoolManager *buffer_pool_manager) {
-    array[GetSize()] = pair;
+    array[GetSize()].first = pair.first;
+    array[GetSize()].second = pair.second;
     auto *childRawPage = buffer_pool_manager->FetchPage(pair.second);
     auto *childTreePage = reinterpret_cast<BPlusTreePage *>(childRawPage->GetData());
     childTreePage->SetParentPageId(GetPageId());
@@ -293,10 +297,12 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyFirstFrom(
     buffer_pool_manager->UnpinPage(GetParentPageId(), true);
 
     for(int i=GetSize(); i>0; i--){
-        array[i] = array[i-1];
+        array[i].first = array[i-1].first;
+        array[i].second = array[i-1].second;
     }
 
-    array[0] = pair;
+    array[0].first = pair.first;
+    array[0].second = pair.second;
     IncreaseSize(1);
 }
 

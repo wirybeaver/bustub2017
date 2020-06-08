@@ -65,9 +65,9 @@ namespace cmudb {
                                                  BTreeOpType op = BTreeOpType::READ,
                                                  Transaction *transaction = nullptr);
 
-        BPlusTreePage *CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction);
+        BPlusTreePage *CrabbingFetchPage(page_id_t child, page_id_t parent, BTreeOpType op, Transaction *transaction);
 
-        void FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction, Page *cur = nullptr);
+        void FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction);
 
     private:
         void StartNewTree(const KeyType &key, const ValueType &value);

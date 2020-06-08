@@ -384,7 +384,12 @@ namespace cmudb {
  * @return : index iterator
  */
     INDEX_TEMPLATE_ARGUMENTS
-    INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin() { return INDEXITERATOR_TYPE(); }
+    INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin() {
+        KeyType dummy;
+        auto *firstLeafPage = FindLeafPage(dummy, true);
+        TryUnlockRootPageId(false);
+        return INDEXITERATOR_TYPE(firstLeafPage, buffer_pool_manager_, 0);
+    }
 
 /*
  * Input parameter is low key, find the leaf page that contains the input key
@@ -393,7 +398,13 @@ namespace cmudb {
  */
     INDEX_TEMPLATE_ARGUMENTS
     INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) {
-        return INDEXITERATOR_TYPE();
+        auto *firstLeafPage = FindLeafPage(key);
+        TryUnlockRootPageId(false);
+        if(firstLeafPage == nullptr) {
+            return INDEXITERATOR_TYPE(nullptr, buffer_pool_manager_, 0);
+        }
+        int idx = firstLeafPage->KeyIndex(key, comparator_);
+        return INDEXITERATOR_TYPE(firstLeafPage, buffer_pool_manager_, idx);
     }
 
 /*****************************************************************************
@@ -414,24 +425,35 @@ namespace cmudb {
             TryUnlockRootPageId(exclusive);
             return nullptr;
         }
-        auto *bTreeNode = CrabbingFetchPage(root_page_id_, op, transaction);
+        auto *bTreeNode = CrabbingFetchPage(root_page_id_, -1, op, transaction);
         while (!bTreeNode->IsLeafPage()) {
             auto *internalNode = static_cast<B_PLUS_TREE_INTERNAL_PAGE *>(bTreeNode);
             page_id_t child = leftMost? internalNode->ValueAt(0) : internalNode->Lookup(key, comparator_);
-            bTreeNode = CrabbingFetchPage(child, op, transaction);
+            bTreeNode = CrabbingFetchPage(child, bTreeNode->GetPageId(), op, transaction);
         }
         return static_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(bTreeNode);
     }
 
     INDEX_TEMPLATE_ARGUMENTS
-    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction){
+    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, page_id_t parent, BTreeOpType op, Transaction *transaction){
         bool exclusive = op != BTreeOpType::READ;
         auto *childRawPage = buffer_pool_manager_->FetchPage(child);
         assert(childRawPage != nullptr);
         childRawPage->Latch(exclusive);
         auto *childBTreeNode = reinterpret_cast<BPlusTreePage *>(childRawPage->GetData());
         if(childBTreeNode ->IsSafe(op)) {
-            FreePagesInTransaction(exclusive, true, transaction, childRawPage);
+            if(transaction == nullptr) {
+                // called by iterator
+                if(parent!=INVALID_PAGE_ID) {
+                    Page *parentRawPage = buffer_pool_manager_->FetchPage(parent);
+                    buffer_pool_manager_->UnpinPage(parentRawPage->GetPageId(), false);
+                    assert(parentRawPage->GetPinCount()>0);
+                    parentRawPage->UnLatch(exclusive);
+                    buffer_pool_manager_->UnpinPage(parentRawPage->GetPageId(), false);
+                }
+            } else {
+                FreePagesInTransaction(exclusive, true, transaction);
+            }
         }
         if(transaction != nullptr) {
             transaction->AddIntoPageSet(childRawPage);
@@ -440,16 +462,10 @@ namespace cmudb {
     }
 
     INDEX_TEMPLATE_ARGUMENTS
-    void BPLUSTREE_TYPE::FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction, Page *cur) {
+    void BPLUSTREE_TYPE::FreePagesInTransaction(bool exclusive, bool findLeafPageOngoing, Transaction *transaction) {
+        assert(transaction!= nullptr);
         TryUnlockRootPageId(exclusive);
         bool likelyDirty = exclusive && !findLeafPageOngoing;
-        if (transaction == nullptr) {
-            // called by iterator
-            assert(!exclusive && findLeafPageOngoing && cur != nullptr);
-            cur->UnLatch(exclusive);
-            buffer_pool_manager_->UnpinPage(cur->GetPageId(), likelyDirty);
-            return;
-        }
         for( Page *page : *transaction->GetPageSet()) {
             page->UnLatch(exclusive);
             buffer_pool_manager_->UnpinPage(page->GetPageId(), likelyDirty);
