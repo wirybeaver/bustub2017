@@ -111,7 +111,7 @@ namespace cmudb {
                                         Transaction *transaction) {
         // assumption: the tree is not empty.
         Page *rawLeafPage = nullptr;
-        auto *leafPage = FindLeafPage(key, false, rawLeafPage, BTreeOpType::INSERT, transaction);
+        auto *leafPage = FindLeafPage(key, false,BTreeOpType::INSERT, transaction);
         ValueType v;
         bool containsKey = leafPage->Lookup(key, v, comparator_);
         if (containsKey) {
@@ -195,25 +195,106 @@ namespace cmudb {
  *****************************************************************************/
 /*
  * Delete key & value pair associated with input key
- * If current tree is empty, return immdiately.
+ * If current tree is empty, return immediately.
  * If not, User needs to first find the right leaf page as deletion target, then
  * delete entry from leaf page. Remember to deal with redistribute or merge if
  * necessary.
  */
     INDEX_TEMPLATE_ARGUMENTS
-    void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {}
+    void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
+        LockRootPageId(true);
+        if(IsEmpty()) {
+            TryUnlockRootPageId(true);
+            return;
+        }
+        TryUnlockRootPageId(true);
+        B_PLUS_TREE_LEAF_PAGE_TYPE *bTreeLeafNode = FindLeafPage(key, false, BTreeOpType::DELETE, transaction);
+        ValueType v;
+        bool containsKey = bTreeLeafNode->Lookup(key, v, comparator_);
+        if (!containsKey) {
+            FreePagesInTransaction(true, false, transaction);
+            return;
+        }
+        bTreeLeafNode->RemoveAndDeleteRecord(key, comparator_);
+        if(bTreeLeafNode->GetSize() < bTreeLeafNode->GetMinSize()) {
+            CoalesceOrRedistribute(bTreeLeafNode, transaction);
+        }
+        FreePagesInTransaction(true, false, transaction);
+    }
 
 /*
  * User needs to first find the sibling of input page. If sibling's size + input
  * page's size > page's max size, then redistribute. Otherwise, merge.
  * Using template N to represent either internal page or leaf page.
- * @return: true means target leaf page should be deleted, false means no
- * deletion happens
+ * @return: true means coalesce happens
  */
     INDEX_TEMPLATE_ARGUMENTS
     template<typename N>
     bool BPLUSTREE_TYPE::CoalesceOrRedistribute(N *node, Transaction *transaction) {
-        return false;
+        if(node->IsRootPage()) {
+            bool deleteRoot = AdjustRoot(node);
+            assert(deleteRoot);
+            transaction->AddIntoDeletedPageSet(node->GetPageId());
+            return true;
+        }
+        // fetch twice. MUST unpin.
+        Page *rawParentPage = buffer_pool_manager_ -> FetchPage(node->GetParentPageId());
+        assert(rawParentPage!= nullptr);
+        auto *bTreeParentNode = reinterpret_cast<B_PLUS_TREE_INTERNAL_PAGE *>(rawParentPage -> GetData());
+        int in_parent_idx = bTreeParentNode -> ValueIndex(node->GetPageId());
+        Page *rawLeftSiblingPage = nullptr, *rawRightSiblingPage = nullptr;
+        N *bTreeLeftSiblingNode = nullptr, *bTreeRightSiblingNode = nullptr;
+        if(in_parent_idx > 0) {
+            rawLeftSiblingPage = buffer_pool_manager_ -> FetchPage(bTreeParentNode -> ValueAt(in_parent_idx-1));
+            rawLeftSiblingPage->Latch(true);
+            bTreeLeftSiblingNode = reinterpret_cast<N *>(rawLeftSiblingPage -> GetData());
+            if(bTreeLeftSiblingNode->GetSize() > bTreeLeftSiblingNode->GetMinSize()) {
+                transaction->AddIntoPageSet(rawLeftSiblingPage);
+                buffer_pool_manager_-> UnpinPage(bTreeParentNode->GetPageId(), false);
+                Redistribute(bTreeLeftSiblingNode, node, in_parent_idx);
+                assert(rawParentPage->GetPinCount()>0);
+                return false;
+            }
+        }
+        if(in_parent_idx < bTreeParentNode->GetSize()-1) {
+            rawRightSiblingPage = buffer_pool_manager_ -> FetchPage(bTreeParentNode -> ValueAt(in_parent_idx+1));
+            rawRightSiblingPage->Latch(true);
+            bTreeRightSiblingNode = reinterpret_cast<N *>(rawRightSiblingPage -> GetData());
+            if(bTreeRightSiblingNode->GetSize() > bTreeRightSiblingNode->GetMinSize()) {
+                if(bTreeLeftSiblingNode!= nullptr) {
+                    rawLeftSiblingPage->UnLatch(true);
+                    buffer_pool_manager_->UnpinPage(bTreeLeftSiblingNode->GetPageId(), false);
+                }
+                transaction->AddIntoPageSet(rawRightSiblingPage);
+                buffer_pool_manager_-> UnpinPage(bTreeParentNode->GetPageId(), false);
+                Redistribute(bTreeRightSiblingNode, node, 0);
+                assert(rawParentPage->GetPinCount()>0);
+                return false;
+            }
+        }
+
+        // Coalesce
+        if(in_parent_idx > 0) {
+            assert(rawLeftSiblingPage != nullptr && bTreeLeftSiblingNode!= nullptr && rawLeftSiblingPage->GetPageId()==bTreeLeftSiblingNode->GetPageId());
+            if(bTreeRightSiblingNode != nullptr) {
+                assert(rawRightSiblingPage!= nullptr && rawRightSiblingPage->GetPageId() == bTreeRightSiblingNode->GetPageId());
+                rawRightSiblingPage->UnLatch(true);
+                buffer_pool_manager_->UnpinPage(bTreeRightSiblingNode->GetPageId(), false);
+            }
+            transaction->AddIntoPageSet(rawLeftSiblingPage);
+            buffer_pool_manager_-> UnpinPage(bTreeParentNode->GetPageId(), false);
+            assert(rawParentPage->GetPinCount()>0);
+            Coalesce(bTreeLeftSiblingNode, node, bTreeParentNode, in_parent_idx, transaction);
+            return true;
+        } else {
+            assert(rawRightSiblingPage != nullptr && bTreeRightSiblingNode != nullptr && rawRightSiblingPage->GetPageId()==bTreeRightSiblingNode->GetPageId());
+            assert(rawLeftSiblingPage == nullptr && bTreeLeftSiblingNode==nullptr);
+            transaction->AddIntoPageSet(rawLeftSiblingPage);
+            buffer_pool_manager_-> UnpinPage(bTreeParentNode->GetPageId(), false);
+            assert(rawParentPage->GetPinCount()>0);
+            Coalesce(node, bTreeRightSiblingNode, bTreeParentNode, in_parent_idx+1, transaction);
+            return true;
+        }
     }
 
 /*
@@ -234,6 +315,14 @@ namespace cmudb {
             N *&neighbor_node, N *&node,
             BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator> *&parent,
             int index, Transaction *transaction) {
+        assert(node->GetSize() + node->GetSize() <= node->GetMaxSize());
+        // assumption, neighbor_node is always before node
+        node->MoveAllTo(neighbor_node, index, buffer_pool_manager_);
+        transaction->AddIntoDeletedPageSet(node->GetPageId());
+        parent->Remove(index);
+        if(parent->GetSize() < parent->GetMinSize()) {
+            return CoalesceOrRedistribute(parent, transaction);
+        }
         return false;
     }
 
@@ -248,7 +337,14 @@ namespace cmudb {
  */
     INDEX_TEMPLATE_ARGUMENTS
     template<typename N>
-    void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {}
+    void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {
+        if(index == 0) {
+            //right sibling
+            neighbor_node->MoveFirstToEndOf(node, buffer_pool_manager_);
+        } else {
+            neighbor_node->MoveLastToFrontOf(node, index, buffer_pool_manager_);
+        }
+    }
 /*
  * Update root page if necessary
  * NOTE: size of root page can be less than min size and this method is only
@@ -261,7 +357,22 @@ namespace cmudb {
  */
     INDEX_TEMPLATE_ARGUMENTS
     bool BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) {
-        return false;
+        if(old_root_node->IsLeafPage()) {
+            //case 2
+            root_page_id_ = INVALID_PAGE_ID;
+            UpdateRootPageId();
+            return true;
+        }
+        // case 1
+        assert(old_root_node->GetSize()==1);
+        auto *bTreeInternalNode = static_cast<B_PLUS_TREE_INTERNAL_PAGE *>(old_root_node);
+        page_id_t newRootId = bTreeInternalNode->RemoveAndReturnOnlyChild();
+        auto *rawPage = buffer_pool_manager_->FetchPage(newRootId);
+        assert(rawPage != nullptr);
+        auto *newBTreeRootNode = reinterpret_cast<BPlusTreePage *>(rawPage->GetData());
+        newBTreeRootNode -> SetParentPageId(INVALID_PAGE_ID);
+        buffer_pool_manager_->UnpinPage(newRootId, true);
+        return true;
     }
 
 /*****************************************************************************
@@ -295,7 +406,6 @@ namespace cmudb {
     INDEX_TEMPLATE_ARGUMENTS
     B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
                                                              bool leftMost,
-                                                             Page *rawPage,
                                                              BTreeOpType op,
                                                              Transaction *transaction) {
         bool exclusive = op != BTreeOpType::READ;
@@ -304,20 +414,17 @@ namespace cmudb {
             TryUnlockRootPageId(exclusive);
             return nullptr;
         }
-        rawPage = nullptr;
-        auto *bTreeNode = CrabbingFetchPage(root_page_id_, rawPage, op, transaction);
+        auto *bTreeNode = CrabbingFetchPage(root_page_id_, op, transaction);
         while (!bTreeNode->IsLeafPage()) {
             auto *internalNode = static_cast<B_PLUS_TREE_INTERNAL_PAGE *>(bTreeNode);
             page_id_t child = leftMost? internalNode->ValueAt(0) : internalNode->Lookup(key, comparator_);
-            rawPage = nullptr;
-            bTreeNode = CrabbingFetchPage(child, rawPage, op, transaction);
+            bTreeNode = CrabbingFetchPage(child, op, transaction);
         }
-        assert(rawPage->GetPageId() == bTreeNode->GetPageId());
         return static_cast<B_PLUS_TREE_LEAF_PAGE_TYPE *>(bTreeNode);
     }
 
     INDEX_TEMPLATE_ARGUMENTS
-    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, Page * rawPage, BTreeOpType op, Transaction *transaction){
+    BPlusTreePage *BPLUSTREE_TYPE::CrabbingFetchPage(page_id_t child, BTreeOpType op, Transaction *transaction){
         bool exclusive = op != BTreeOpType::READ;
         auto *childRawPage = buffer_pool_manager_->FetchPage(child);
         assert(childRawPage != nullptr);
@@ -329,8 +436,6 @@ namespace cmudb {
         if(transaction != nullptr) {
             transaction->AddIntoPageSet(childRawPage);
         }
-        rawPage = childRawPage;
-        assert(rawPage->GetPageId() == childBTreeNode->GetPageId());
         return childBTreeNode;
     }
 
