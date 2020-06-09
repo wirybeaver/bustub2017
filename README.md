@@ -1,5 +1,5 @@
-- [ ] Lab1 Buffer Pool Manager
-- [ ] Lab2 B+Tree
+- [x] Lab1 Buffer Pool Manager
+- [x] Lab2 B+Tree
 - [ ] Lab3 Two-Phase Locking
 - [ ] Lab4 Logging & Recovery
 
