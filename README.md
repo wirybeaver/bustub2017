@@ -1,5 +1,11 @@
-# 15-445 Database Systems
-# SQLite Project Source Code
+- [ ] Lab1 Buffer Pool Manager
+- [ ] Lab2 B+Tree
+- [ ] Lab3 Two-Phase Locking
+- [ ] Lab4 Logging & Recovery
+
+---
+
+Original 15-445 Database Systems Readme
 
 ### Build
 ```
