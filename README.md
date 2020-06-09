@@ -5,7 +5,7 @@
 
 ---
 
-Original 15-445 Database Systems Readme
+Original ReadMe of the course CMU 15-445 Database Systems
 
 ### Build
 ```
